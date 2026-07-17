@@ -588,6 +588,9 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
           .leaflet-bar a:hover { 
             background-color: var(--bg-button-hover, #f8fafc) !important; 
           }
+          .dark-map .leaflet-tile-container {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+          }
           @keyframes pulse {
             0% { transform: scale(1); opacity: 1; }
             100% { transform: scale(2.5); opacity: 0; }
@@ -620,20 +623,20 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
               root.style.setProperty('--text-button', '#f8fafc');
               root.style.setProperty('--border-button', '#334155');
               root.style.setProperty('--bg-button-hover', '#334155');
+              document.getElementById('map').classList.add('dark-map');
             } else {
               root.style.setProperty('--bg-button', '#ffffff');
               root.style.setProperty('--text-button', '#1e293b');
               root.style.setProperty('--border-button', '#e2e8f0');
               root.style.setProperty('--bg-button-hover', '#f8fafc');
+              document.getElementById('map').classList.remove('dark-map');
             }
 
-            const tileUrl = isDark 
-              ? 'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png'
-              : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+            const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
             currentTileLayer = L.tileLayer(tileUrl, {
               maxZoom: 19,
-              attribution: '&copy; <a href="https://carto.com/">CARTO</a>'
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(map);
           }
 

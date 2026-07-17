@@ -264,10 +264,6 @@ FRONTEND_URL=http://localhost:3000
 # Secreto para invocar tareas cron (notificaciones masivas automáticas)
 CRON_SECRET=tu_cron_secret_aqui
 
-# --- GOOGLE MAPS (Geocodificación y Mapas) ---
-# Clave de API de Google Maps JavaScript API
-VITE_GOOGLE_MAPS_API_KEY=tu_google_maps_api_key_aqui
-
 # --- ENTORNO ---
 # Define el modo de ejecución (development o production)
 NODE_ENV=development
