@@ -450,7 +450,7 @@ export default function ConsultaView({ user, onNavigate, onTriggerEmergency }: C
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
-    const userText = inputValue.trim();
+    const userText = inputValue.trim().substring(0, 2000);
     const newUserMsg: ChatMessage = {
       id: Date.now().toString(),
       text: userText,
@@ -524,10 +524,16 @@ export default function ConsultaView({ user, onNavigate, onTriggerEmergency }: C
     }
 
     try {
+      const historyToSend = messages.slice(-10);
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText, userProfile: user, language })
+        body: JSON.stringify({ 
+          message: userText, 
+          history: historyToSend,
+          userProfile: user, 
+          language 
+        })
       });
 
       let data: any;
@@ -875,6 +881,7 @@ export default function ConsultaView({ user, onNavigate, onTriggerEmergency }: C
             onKeyDown={handleKeyDown}
             placeholder={isChatMode ? "Escribe tu consulta aquí..." : "Describe tus síntomas…"}
             disabled={isLoading}
+            maxLength={2000}
             className="relative z-10 w-full bg-transparent outline-none resize-none placeholder:text-slate-400 dark:placeholder:text-slate-600 text-slate-800 dark:text-slate-200 disabled:opacity-50"
             style={{ height: "56px", fontSize: "15px", lineHeight: 1.5, fontWeight: 400, fontFamily: "'Inter', sans-serif", paddingLeft: "4px", paddingRight: "4px" }}
           />

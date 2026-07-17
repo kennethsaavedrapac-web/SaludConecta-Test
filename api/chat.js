@@ -78,7 +78,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, userProfile, language } = req.body;
+    const { message, history, userProfile, language } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: "Message is required" });
@@ -179,6 +179,31 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
     // Call Groq API
     let responseText = "";
     try {
+      // Sanitize and limit user input
+      let sanitizedMessage = message;
+      if (typeof message === 'string') {
+        sanitizedMessage = message.trim().substring(0, 2000);
+      }
+
+      // Construct messages payload with history support
+      const messagesPayload = [
+        { role: "system", content: systemPrompt }
+      ];
+
+      if (history && Array.isArray(history)) {
+        // Keep only the last 10 messages for context size safety
+        const safeHistory = history.slice(-10);
+        safeHistory.forEach((turn) => {
+          const role = (turn.sender === "user" || turn.role === "user") ? "user" : "assistant";
+          const text = turn.text || turn.content || "";
+          if (text) {
+            messagesPayload.push({ role, content: text.substring(0, 1000) });
+          }
+        });
+      }
+
+      messagesPayload.push({ role: "user", content: sanitizedMessage });
+
       const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -187,13 +212,11 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
         },
         body: JSON.stringify({
           model: aiModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message }
-          ],
+          messages: messagesPayload,
           temperature: 0.2,
           max_tokens: 1024
-        })
+        }),
+        signal: AbortSignal.timeout(20000) // 20 seconds timeout
       });
 
       if (!groqResponse.ok) {
@@ -205,7 +228,8 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
       responseText = groqData.choices?.[0]?.message?.content || "";
     } catch (sendErr) {
       console.error("Groq Send Message Error:", sendErr);
-      if (sendErr.message?.includes("safety") || sendErr.message?.includes("refuse")) {
+      const errMessage = sendErr.message || String(sendErr);
+      if (errMessage.includes("safety") || errMessage.includes("refuse")) {
         return res.status(200).json({
           text: "Lo siento, no puedo procesar esa consulta por razones de seguridad. Por favor, intenta describir tus síntomas de forma más directa.",
           simulated: false
@@ -218,9 +242,10 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
     if (supabase) {
       try {
         const userId = userProfile?.id;
+        const sanitizedMsgLen = typeof message === 'string' ? message.trim().substring(0, 2000).length : 0;
         await supabase.from('chat_logs').insert({
           user_id: userId || null,
-          message_length: message.length,
+          message_length: sanitizedMsgLen,
           created_at: new Date().toISOString()
         });
       } catch (logErr) {
@@ -245,10 +270,10 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
       userMessage = "Error de autenticación con la API de Groq. Verifica que la API key sea válida.";
     } else if (errorMessage.includes("SAFETY")) {
       userMessage = "La respuesta fue bloqueada por filtros de seguridad. Intenta reformular tu consulta.";
-    } else if (errorMessage.includes("quota") || errorMessage.includes("429") || errorMessage.includes("Too Many Requests")) {
-      userMessage = "Cuota de API excedida. Usando modo de respuesta simulada para continuar.";
+    } else if (errorMessage.includes("quota") || errorMessage.includes("429") || errorMessage.includes("Too Many Requests") || errorMessage.includes("timeout") || errorMessage.includes("abort") || errorMessage.includes("fetch") || errorMessage.includes("500") || errorMessage.includes("status")) {
+      userMessage = "Límite de uso o error temporal de conexión con el asistente. Usando modo de respuesta simulada para continuar.";
       shouldUseFallback = true;
-      console.log("API quota exceeded, switching to simulated mode");
+      console.log("API quota or connection issue, switching to simulated mode");
     }
 
     if (shouldUseFallback) {

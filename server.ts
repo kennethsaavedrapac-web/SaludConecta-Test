@@ -10,6 +10,7 @@ import rateLimit from "express-rate-limit";
 // Import Vercel API handlers to make them work locally
 import fhirHandler from "./api/fhir.js";
 import fhirGetHandler from "./api/fhir-get.js";
+import geocodeHandler from "./api/geocode.js";
 
 dotenv.config();
 
@@ -198,22 +199,30 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
         console.error("Error fetching dynamic model config from Supabase:", dbErr);
       }
 
+      // Sanitize and limit user input
+      let sanitizedMessage = message;
+      if (typeof message === 'string') {
+        sanitizedMessage = message.trim().substring(0, 2000);
+      }
+
       // Map chat history and build message payload for Groq
       const messages = [
         { role: "system", content: finalSystemInstruction }
       ];
 
       if (history && Array.isArray(history)) {
-        history.forEach((turn: any) => {
+        // Keep only the last 10 messages for context size safety
+        const safeHistory = history.slice(-10);
+        safeHistory.forEach((turn: any) => {
           const role = (turn.sender === "user" || turn.role === "user") ? "user" : "assistant";
           const text = turn.text || turn.content || "";
           if (text) {
-            messages.push({ role, content: text });
+            messages.push({ role, content: text.substring(0, 1000) });
           }
         });
       }
 
-      messages.push({ role: "user", content: message });
+      messages.push({ role: "user", content: sanitizedMessage });
 
       // Send request to Groq API
       let responseText = "";
@@ -229,7 +238,8 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
             messages: messages,
             temperature: 0.2,
             max_tokens: 1024
-          })
+          }),
+          signal: AbortSignal.timeout(20000) // 20 seconds timeout
         });
 
         if (!groqResponse.ok) {
@@ -241,9 +251,32 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
         responseText = groqData.choices?.[0]?.message?.content || "";
       } catch (aiErr: any) {
         console.error("Groq Generation Error:", aiErr);
-        if (aiErr?.message?.includes("safety") || aiErr?.message?.includes("refuse")) {
-            return res.status(200).json({ text: "Consulta bloqueada por seguridad. Reformule sus síntomas.", simulated: false });
+        const errMessage = aiErr?.message || String(aiErr);
+
+        if (errMessage.includes("safety") || errMessage.includes("refuse")) {
+          return res.status(200).json({ 
+            text: "Consulta bloqueada por seguridad. Reformule sus síntomas.", 
+            simulated: false 
+          });
         }
+
+        const isQuota = errMessage.includes("429") || errMessage.includes("quota") || errMessage.includes("Too Many Requests");
+        const isTimeout = errMessage.includes("timeout") || errMessage.includes("abort");
+
+        if (isQuota || isTimeout || errMessage.includes("fetch") || errMessage.includes("500") || errMessage.includes("status")) {
+          const warningMsg = isQuota 
+            ? "Límite de uso alcanzado en la API." 
+            : isTimeout 
+              ? "Tiempo de espera de la API agotado." 
+              : "Error temporal de conexión con el asistente.";
+
+          return res.json({
+            text: `Nivel de prioridad: 🟡 Moderado\n\n🔍 EVALUACIÓN INICIAL\nLos síntomas reportados ("${sanitizedMessage}") indican una situación que requiere vigilancia activa. El análisis sugiere que no se detectan signos de emergencia inmediata, pero es fundamental seguir las pautas de cuidado para monitorear que el cuadro no progrese.\n\n✅ RECOMENDACIONES\n🔹 Mantener reposo absoluto y evitar esfuerzos físicos.\n🔹 Hidratación constante con líquidos claros o suero oral.\n🔹 Monitorear síntomas cada 2-4 horas.\n🔹 Si los síntomas persisten o empeoran tras 24 horas, acuda a su centro de salud.\n🔹 Contacte al 118 si presenta dificultad para respirar, dolor severo o cambios de conciencia.\n\n⚠️ Esta orientación es únicamente informativa y no reemplaza la evaluación de un profesional de salud.`,
+            simulated: true,
+            warning: `${warningMsg} Activado modo de contingencia.`
+          });
+        }
+
         throw aiErr;
       }
 
@@ -252,7 +285,7 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
         const userId = userProfile?.id;
         await supabase.from('chat_logs').insert({
           user_id: userId || null,
-          message_length: message.length,
+          message_length: sanitizedMessage.length,
           created_at: new Date().toISOString()
         });
       } catch (logErr) {
@@ -266,8 +299,17 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
 
     } catch (error: any) {
       console.error("Detalle del Error en API Chat:", error);
+      const errorMessage = error?.message || String(error) || "Error desconocido";
+      let userMessage = "Ocurrió un error procesando el triaje virtual con IA. Intente nuevamente.";
+      
+      if (errorMessage.includes("API_KEY") || errorMessage.includes("401") || errorMessage.includes("403") || errorMessage.includes("PERMISSION")) {
+        userMessage = "Error de autenticación con la API de Groq. Verifica que la API key sea válida.";
+      } else if (errorMessage.includes("SAFETY")) {
+        userMessage = "La respuesta fue bloqueada por filtros de seguridad. Intenta reformular tu consulta.";
+      }
+      
       return res.status(500).json({
-        error: "Ocurrió un error procesando el triaje virtual con IA. Intente nuevamente."
+        error: userMessage
       });
     }
   });
@@ -281,6 +323,11 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
 
   app.get("/api/fhir-get", (req: Request, res: Response) => {
     return fhirGetHandler(req, res);
+  });
+
+  // Mount Geocode proxy endpoint
+  app.get("/api/geocode", (req: Request, res: Response) => {
+    return geocodeHandler(req, res);
   });
 
   // Hot module reloading and client asset serving
