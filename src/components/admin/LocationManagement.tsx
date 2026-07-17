@@ -123,8 +123,8 @@ export default function LocationManagement() {
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <link rel="stylesheet" href="/leaflet.css" />
+      <script src="/leaflet.js"></script>
       <style>
         html,body,#map{height:100%;margin:0;padding:0;background:#f1f5f9}
         .leaflet-control-zoom{border:none!important;box-shadow:0 4px 12px rgba(0,0,0,.1)!important}

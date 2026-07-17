@@ -483,13 +483,13 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
         : `https://www.openstreetmap.org/search?query=${encodeURIComponent(selectedCenterSearch)}`;
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
-  const getMapCategory = (type: string): "hospital" | "centro_salud" | "farmacia" | "medico" | null => {
+  const getMapCategory = (type: string): "hospital" | "centro_salud" | "farmacia" | "medico" | "otro" => {
     const t = type.toLowerCase();
     if (t.includes("hospital")) return "hospital";
     if (t.includes("centro de salud") || t.includes("puesto de salud") || t.includes("salud")) return "centro_salud";
     if (t.includes("farmacia")) return "farmacia";
     if (t.includes("medico") || t.includes("médico") || t.includes("doctor") || t.includes("consultorio") || t.includes("clinica") || t.includes("clínica")) return "medico";
-    return null;
+    return "otro";
   };
 
   const mapCentersData = (centers: typeof filteredCenters) => {
@@ -497,7 +497,6 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
       .filter((c) => c.latitude && c.longitude)
       .map((c) => {
         const category = getMapCategory(c.type);
-        if (!category) return null;
         return {
           id: c.id,
           name: c.name,
@@ -506,8 +505,7 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
           lng: c.longitude,
           category,
         };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null);
+      });
   };
 
   const handleRecenter = () => {
@@ -574,8 +572,8 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <link rel="stylesheet" href="/leaflet.css" />
+        <script src="/leaflet.js"></script>
         <style>
           html, body, #map { height: 100%; margin: 0; padding: 0; background: #f1f5f9; transition: background-color 0.3s; }
           .leaflet-control-zoom { border: none !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important; }
@@ -600,15 +598,18 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
       <body>
         <div id="map"></div>
         <script>
-          const map = L.map('map', {
-            zoomControl: true,
-            attributionControl: false
-          }).setView([12.1364, -86.2514], 9);
-
+          let map = null;
           let currentTileLayer = null;
           let currentTheme = null;
+          let markersGroup = null;
+          let userLocationMarker = null;
+          let markersMap = new Map();
+          let routeLine = null;
+          let currentSelectedId = null;
+          let lastMessage = null;
 
           function updateTheme(isDark) {
+            if (!map) return;
             if (currentTheme === isDark && currentTileLayer) return;
             currentTheme = isDark;
 
@@ -640,14 +641,24 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
             }).addTo(map);
           }
 
-          // Initial load theme default to light
-          updateTheme(false);
-
-          let markersGroup = L.layerGroup().addTo(map);
-          let userLocationMarker = null;
-          let markersMap = new Map();
+          function getIconSvg(category, iconSize) {
+            const attrs = \`width="\${iconSize}" height="\${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"\`;
+            if (category === 'hospital') {
+              return \`<svg \${attrs}><path d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16"/><path d="M3 21h18"/><path d="M10 9h4"/><path d="M12 7v4"/></svg>\`;
+            } else if (category === 'centro_salud') {
+              return \`<svg \${attrs}><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>\`;
+            } else if (category === 'farmacia') {
+              return \`<svg \${attrs}><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></svg>\`;
+            } else if (category === 'medico') {
+              return \`<svg \${attrs}><path d="M4.8 2.3A7.3 7.3 0 1 0 11 11" /><path d="M11 11a7.3 7.3 0 0 0 6.2 8.7" /><path d="M12 11a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /><path d="M15 13.5A7.3 7.3 0 0 1 7.7 19" /><path d="M19.5 2.5a3 3 0 1 1 3 3" /><path d="M21 5.5a3 3 0 1 1-3-3" /></svg>\`;
+            } else {
+              // 'otro' / generic location pin
+              return \`<svg \${attrs}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>\`;
+            }
+          }
 
           function updateMarkers(centers, selectedId) {
+            if (!map || !markersGroup) return;
             markersGroup.clearLayers();
             markersMap.clear();
 
@@ -661,25 +672,22 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
               const borderColor = isSelected ? '#3b82f6' : (currentTheme ? '#1e293b' : '#ffffff');
               const shadow = isSelected ? '0 0 12px #3b82f6' : '0 2px 6px rgba(0,0,0,0.2)';
               
-              let bgColor = '#ef4444'; // Red (centro_salud)
-              let label = '+';
-              let fontSize = isSelected ? 19 : 15;
+              let bgColor = '#64748b'; // default Slate (otro)
               
               if (c.category === 'hospital') {
                 bgColor = '#10b981'; // Green for hospitals
-                label = 'H';
-                fontSize = isSelected ? 15 : 12;
+              } else if (c.category === 'centro_salud') {
+                bgColor = '#ef4444'; // Red for health centers
               } else if (c.category === 'farmacia') {
                 bgColor = '#2563eb'; // Blue for pharmacies
-                label = 'F';
-                fontSize = isSelected ? 15 : 12;
               } else if (c.category === 'medico') {
-                bgColor = '#8b5cf6'; // Purple for doctors
-                label = 'M';
-                fontSize = isSelected ? 15 : 12;
+                bgColor = '#8b5cf6'; // Purple for doctors/clinics
               }
               
-              const htmlIcon = \`<div style="background-color: \\\${bgColor}; width: \\\${size}px; height: \\\${size}px; border-radius: 50%; border: \\\${borderSize} solid \\\${borderColor}; display: flex; align-items: center; justify-content: center; color: white; font-family: system-ui, -apple-system, sans-serif; font-weight: bold; font-size: \\\${fontSize}px; box-shadow: \\\${shadow}; transition: all 0.2s;">\\\${label}</div>\`;
+              const iconSize = isSelected ? 22 : 16;
+              const svgIcon = getIconSvg(c.category, iconSize);
+              
+              const htmlIcon = \`<div style="background-color: \${bgColor}; width: \${size}px; height: \${size}px; border-radius: 50%; border: \${borderSize} solid \${borderColor}; display: flex; align-items: center; justify-content: center; color: white; box-shadow: \${shadow}; transition: all 0.2s;">\${svgIcon}</div>\`;
 
               const icon = L.divIcon({
                 html: htmlIcon,
@@ -698,6 +706,7 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
           }
 
           function updateUserLocation(loc) {
+            if (!map) return;
             if (userLocationMarker) {
               map.removeLayer(userLocationMarker);
               userLocationMarker = null;
@@ -715,14 +724,15 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
           }
 
           function centerOnSelected(selectedId, zoomLevel) {
+            if (!map) return;
             const data = markersMap.get(selectedId);
             if (data) {
               map.setView([data.lat, data.lng], zoomLevel || 15);
             }
           }
 
-          let routeLine = null;
           function updateRoute(userLoc, selectedId) {
+            if (!map) return;
             if (routeLine) {
               map.removeLayer(routeLine);
               routeLine = null;
@@ -747,29 +757,60 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
               .catch(err => console.error("Error drawing route on Leaflet:", err));
           }
 
-          let currentSelectedId = null;
+          function processMessage(msg) {
+            updateTheme(msg.isDark);
+            updateMarkers(msg.centers, msg.selectedId);
+            updateUserLocation(msg.userLocation);
+            updateRoute(msg.userLocation, msg.selectedId);
+            
+            if (msg.forceCenterOnUser && msg.userLocation) {
+              map.setView([msg.userLocation.latitude, msg.userLocation.longitude], 15);
+            } else if (msg.centerOnId && msg.centerOnId !== currentSelectedId) {
+              currentSelectedId = msg.centerOnId;
+              // Only centerOnSelected if we didn't fitBounds via route update
+              if (!msg.userLocation) {
+                centerOnSelected(msg.centerOnId, msg.zoomLevel);
+              }
+            } else if (!msg.centerOnId) {
+              currentSelectedId = null;
+            }
+          }
 
           window.addEventListener('message', (event) => {
             const msg = event.data;
-            if (msg.type === 'UPDATE_DATA') {
-              updateTheme(msg.isDark);
-              updateMarkers(msg.centers, msg.selectedId);
-              updateUserLocation(msg.userLocation);
-              updateRoute(msg.userLocation, msg.selectedId);
-              
-              if (msg.forceCenterOnUser && msg.userLocation) {
-                map.setView([msg.userLocation.latitude, msg.userLocation.longitude], 15);
-              } else if (msg.centerOnId && msg.centerOnId !== currentSelectedId) {
-                currentSelectedId = msg.centerOnId;
-                // Only centerOnSelected if we didn't fitBounds via route update
-                if (!msg.userLocation) {
-                  centerOnSelected(msg.centerOnId, msg.zoomLevel);
-                }
-              } else if (!msg.centerOnId) {
-                currentSelectedId = null;
+            if (msg && msg.type === 'UPDATE_DATA') {
+              lastMessage = msg;
+              if (map) {
+                processMessage(msg);
               }
             }
           });
+
+          function initMap() {
+            if (typeof L === 'undefined') {
+              setTimeout(initMap, 50);
+              return;
+            }
+
+            map = L.map('map', {
+              zoomControl: true,
+              attributionControl: false
+            }).setView([12.1364, -86.2514], 9);
+
+            markersGroup = L.layerGroup().addTo(map);
+
+            updateTheme(false);
+
+            if (lastMessage) {
+              processMessage(lastMessage);
+            }
+          }
+
+          if (document.readyState === 'complete') {
+            initMap();
+          } else {
+            window.addEventListener('load', initMap);
+          }
         </script>
       </body>
       </html>

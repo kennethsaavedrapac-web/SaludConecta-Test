@@ -37,12 +37,12 @@ async function startServer() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com", "https://unpkg.com"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:", "blob:"],
-        connectSrc: ["'self'", "https://*.supabase.co", "https://generativelanguage.googleapis.com", "https://nominatim.openstreetmap.org"],
+        connectSrc: ["'self'", "https://*.supabase.co", "https://generativelanguage.googleapis.com", "https://nominatim.openstreetmap.org", "https://router.project-osrm.org", "https://*.tile.openstreetmap.org"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        frameSrc: ["'self'", "https://*.supabase.co"],
+        frameSrc: ["'self'"],
         baseUri: ["'self'"],
       },
     },
@@ -328,6 +328,17 @@ El historial de conversación puede incluir consultas de los últimos 14 días c
   // Mount Geocode proxy endpoint
   app.get("/api/geocode", (req: Request, res: Response) => {
     return geocodeHandler(req, res);
+  });
+
+  // Serve Leaflet assets locally so iframes with srcDoc can load them
+  // without requiring external CDN access or Content-Security-Policy allowances.
+  app.get("/leaflet.js", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "application/javascript");
+    res.sendFile(path.resolve(process.cwd(), "node_modules/leaflet/dist/leaflet.js"));
+  });
+  app.get("/leaflet.css", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "text/css");
+    res.sendFile(path.resolve(process.cwd(), "node_modules/leaflet/dist/leaflet.css"));
   });
 
   // Hot module reloading and client asset serving
