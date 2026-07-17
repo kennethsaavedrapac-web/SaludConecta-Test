@@ -152,7 +152,7 @@ export default function AnnouncementManagement() {
       const { data, error } = await supabase
         .from('admin_announcements')
         .select('*')
-        .order('creado_en', { ascending: false });
+        .order('created_at', { ascending: false });
         
       if (error) throw error;
       if (data) setAnnouncements(data as Announcement[]);
