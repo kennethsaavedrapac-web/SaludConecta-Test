@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { supabase } from "../../lib/supabaseClient";
-import { Users, Star, Activity, Megaphone, MapPin, Loader2, ArrowUpRight, ArrowDownRight, Clock, MessageSquare, CreditCard, Calendar } from "lucide-react";
+import { Users, Star, Activity, Megaphone, MapPin, Loader2, ArrowUpRight, ArrowDownRight, Clock, MessageSquare, CreditCard, Calendar, Cpu, HardDrive, AlertCircle, ArrowRightLeft } from "lucide-react";
+import { getSimulatedMetrics } from "../../data/mockMetrics";
 
 const AnalyticsView: React.FC = () => {
   const { t } = useLanguage();
@@ -22,6 +23,7 @@ const AnalyticsView: React.FC = () => {
 
   const [chatActivity, setChatActivity] = useState<{ dayLabel: string; count: number }[]>([]);
   const [chatSource, setChatSource] = useState<"db" | "local" | "simulated">("simulated");
+  const [detailedMetrics, setDetailedMetrics] = useState(() => getSimulatedMetrics(45, 120));
 
   const isAdmin = (profile as any)?.role === "admin";
 
@@ -104,6 +106,24 @@ const AnalyticsView: React.FC = () => {
           }
         }
 
+        // Calculate dynamic weighted metrics
+        const oneHourAgo = new Date();
+        oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+        const messagesLastHour = chatLogs.filter(log => {
+          try {
+            return new Date(log.created_at) >= oneHourAgo;
+          } catch (e) {
+            return false;
+          }
+        }).length;
+
+        // Estimate active users from recent messages, default to 45 for simulated traffic
+        const estimatedActive = source === "simulated" ? 45 : Math.max(Math.round(messagesLastHour * 0.35), 1);
+        const activeMsgs = source === "simulated" ? 120 : messagesLastHour;
+        
+        const dynMetrics = getSimulatedMetrics(estimatedActive, activeMsgs);
+        setDetailedMetrics(dynMetrics);
+
         const getSpanishDayLabel = (date: Date) => {
           const days = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
           return days[date.getDay()];
@@ -121,11 +141,7 @@ const AnalyticsView: React.FC = () => {
 
         let finalActivity = [];
         if (source === "simulated") {
-          const simulatedValues = [12, 28, 15, 42, 22, 35, 18];
-          finalActivity = last7Days.map((day, idx) => ({
-            dayLabel: day.dayLabel,
-            count: simulatedValues[idx]
-          }));
+          finalActivity = dynMetrics.chatActivity;
         } else {
           finalActivity = last7Days.map(day => {
             const matching = chatLogs.filter(log => {
@@ -267,7 +283,216 @@ const AnalyticsView: React.FC = () => {
         </div>
       </div>
 
-      {}
+      {/* Sección de Métricas Ponderadas de Operación y Triaje */}
+      <div>
+        <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-3">
+          Métricas Ponderadas de Operación y Triaje
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          
+          {/* Card 1: Estado y Rendimiento del Servidor */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-850/40 dark:border-slate-800">
+              <h4 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-brand-500 animate-pulse" /> Servidor y Rendimiento
+              </h4>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 border border-brand-100 dark:border-brand-900/50">
+                Cap: {detailedMetrics.server.maxCapacity} concurrentes
+              </span>
+            </div>
+            
+            <div className="space-y-3">
+              {/* Sesiones Activas */}
+              <div>
+                <div className="flex justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <span>Sesiones de Triaje Activas</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {detailedMetrics.server.activeTriageSessions} / {detailedMetrics.server.maxCapacity} ({detailedMetrics.server.currentLoadPercent}%)
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-brand-500 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${detailedMetrics.server.currentLoadPercent}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* CPU & RAM */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-1">
+                    <span className="flex items-center gap-1"><Cpu className="w-3 h-3 text-slate-400" /> CPU</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{detailedMetrics.server.cpuUsage}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        detailedMetrics.server.cpuUsage > 80 ? "bg-red-500" : detailedMetrics.server.cpuUsage > 50 ? "bg-amber-500" : "bg-emerald-500"
+                      }`}
+                      style={{ width: `${detailedMetrics.server.cpuUsage}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-1">
+                    <span className="flex items-center gap-1"><HardDrive className="w-3 h-3 text-slate-400" /> Memoria</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{detailedMetrics.server.memoryUsage}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        detailedMetrics.server.memoryUsage > 85 ? "bg-red-500" : detailedMetrics.server.memoryUsage > 65 ? "bg-amber-500" : "bg-emerald-500"
+                      }`}
+                      style={{ width: `${detailedMetrics.server.memoryUsage}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tiempo de Respuesta de IA */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-semibold flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-brand-500" /> Tiempo de Respuesta IA
+                </span>
+                <span className="font-extrabold text-brand-600 dark:text-brand-400 text-sm">
+                  {detailedMetrics.server.averageAiResponseTimeSeconds}s
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Distribución de Severidad de Casos */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h4 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-500" /> Casos Activos por Severidad
+              </h4>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/50">
+                Protocolo Clínico
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {/* Crítico */}
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-1">
+                  <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                    Crítico (Rojo)
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {detailedMetrics.severity.critical.count} pac. ({detailedMetrics.severity.critical.percent}%)
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-rose-500 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${detailedMetrics.severity.critical.percent}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Urgente */}
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-1">
+                  <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                    Urgente (Naranja)
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {detailedMetrics.severity.urgent.count} pac. ({detailedMetrics.severity.urgent.percent}%)
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-amber-500 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${detailedMetrics.severity.urgent.percent}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Menor */}
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-1">
+                  <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                    Menor / No Urgente
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {detailedMetrics.severity.minor.count} pac. ({detailedMetrics.severity.minor.percent}%)
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${detailedMetrics.severity.minor.percent}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Tasa de Conversión y Conversación */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h4 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                <ArrowRightLeft className="w-4 h-4 text-emerald-500" /> Conversión y Flujo
+              </h4>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/50">
+                Última Hora
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {/* Tasa de Resolución / Conversión */}
+              <div>
+                <div className="flex justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <span>Tasa de Triajes Completados</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {detailedMetrics.conversion.conversionRatePercent}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${detailedMetrics.conversion.conversionRatePercent}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Detalle de Flujo */}
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold text-slate-500 pt-1">
+                <div className="bg-slate-50 dark:bg-slate-800/40 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <span className="block text-[9px] uppercase tracking-wider text-slate-400">Completados</span>
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    {detailedMetrics.conversion.completedTriage} sesiones
+                  </span>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-800/40 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <span className="block text-[9px] uppercase tracking-wider text-slate-400">Abandonados</span>
+                  <span className="text-xs font-bold text-rose-500">
+                    {detailedMetrics.conversion.abandonedTriage} sesiones
+                  </span>
+                </div>
+              </div>
+
+              {/* Volumen de Mensajes */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-semibold flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-500" /> Promedio Mensajes / Sesión
+                </span>
+                <span className="font-extrabold text-emerald-600 dark:text-emerald-400 text-sm">
+                  {detailedMetrics.conversion.averageMessagesPerSession} msg
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         
         {}
@@ -321,11 +546,15 @@ const AnalyticsView: React.FC = () => {
             </div>
             {chatActivity.map((day, idx) => {
               const maxCount = Math.max(...chatActivity.map(d => d.count), 1);
-              const heightPct = Math.max((day.count / maxCount) * 100, 5);
+              // Ponderación: evitamos el 100% inmediato escalando contra un volumen base de 100 interacciones
+              const scaleLimit = Math.max(maxCount, 100);
+              const heightPct = Math.max((day.count / scaleLimit) * 100, 5);
+              const percentOfReference = Math.round((day.count / 100) * 100);
               return (
                 <div key={idx} className="w-full bg-emerald-500/20 hover:bg-emerald-500/40 rounded-t-lg relative group transition-colors" style={{ height: `${heightPct}%` }}>
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md">
-                    {day.count === 1 ? "1 mensaje" : `${day.count} mensajes`}
+                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md flex flex-col items-center gap-0.5">
+                    <span>{day.count === 1 ? "1 mensaje" : `${day.count} mensajes`}</span>
+                    <span className="text-[9px] text-slate-450 font-medium">({percentOfReference}% cap. ref.)</span>
                   </div>
                   <div className="absolute top-0 inset-x-0 bg-emerald-500 rounded-t-lg shadow-[0_0_10px_rgba(16,185,129,0.5)]" style={{ height: '4px' }}></div>
                 </div>
