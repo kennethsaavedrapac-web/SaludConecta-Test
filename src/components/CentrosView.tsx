@@ -477,8 +477,10 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
         : selectedCenterSearch;
   const directionsUrl =
     userLocation && selectedCenter?.latitude && selectedCenter?.longitude
-      ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.latitude},${userLocation.longitude}&destination=${selectedCenter.latitude},${selectedCenter.longitude}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedCenterMapQuery)}`;
+      ? `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${userLocation.latitude}%2C${userLocation.longitude}%3B${selectedCenter.latitude}%2C${selectedCenter.longitude}`
+      : selectedCenter?.latitude && selectedCenter?.longitude
+        ? `https://www.openstreetmap.org/directions?route=%3B${selectedCenter.latitude}%2C${selectedCenter.longitude}`
+        : `https://www.openstreetmap.org/search?query=${encodeURIComponent(selectedCenterSearch)}`;
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
   const getMapCategory = (type: string): "hospital" | "centro_salud" | "farmacia" | "medico" | null => {
@@ -716,6 +718,32 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
             }
           }
 
+          let routeLine = null;
+          function updateRoute(userLoc, selectedId) {
+            if (routeLine) {
+              map.removeLayer(routeLine);
+              routeLine = null;
+            }
+            if (!userLoc || !userLoc.latitude || !userLoc.longitude || !selectedId) return;
+            const center = markersMap.get(selectedId);
+            if (!center || !center.lat || !center.lng) return;
+
+            const url = 'https://router.project-osrm.org/route/v1/driving/' + userLoc.longitude + ',' + userLoc.latitude + ';' + center.lng + ',' + center.lat + '?overview=full&geometries=geojson';
+            fetch(url)
+              .then(res => res.json())
+              .then(data => {
+                if (data.routes && data.routes.length > 0) {
+                  const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                  routeLine = L.polyline(coords, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map);
+                  
+                  // Zoom to fit route bounds
+                  const bounds = L.latLngBounds([userLoc.latitude, userLoc.longitude], [center.lat, center.lng]);
+                  map.fitBounds(bounds, { padding: [50, 50] });
+                }
+              })
+              .catch(err => console.error("Error drawing route on Leaflet:", err));
+          }
+
           let currentSelectedId = null;
 
           window.addEventListener('message', (event) => {
@@ -724,12 +752,16 @@ export default function CentrosView({ onNavigate, onTriggerEmergency }: CentrosV
               updateTheme(msg.isDark);
               updateMarkers(msg.centers, msg.selectedId);
               updateUserLocation(msg.userLocation);
+              updateRoute(msg.userLocation, msg.selectedId);
               
               if (msg.forceCenterOnUser && msg.userLocation) {
                 map.setView([msg.userLocation.latitude, msg.userLocation.longitude], 15);
               } else if (msg.centerOnId && msg.centerOnId !== currentSelectedId) {
                 currentSelectedId = msg.centerOnId;
-                centerOnSelected(msg.centerOnId, msg.zoomLevel);
+                // Only centerOnSelected if we didn't fitBounds via route update
+                if (!msg.userLocation) {
+                  centerOnSelected(msg.centerOnId, msg.zoomLevel);
+                }
               } else if (!msg.centerOnId) {
                 currentSelectedId = null;
               }
